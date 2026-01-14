@@ -21,7 +21,11 @@ from state_manager import (
     save_all_state,
 )
 
+
+# ---------- keyboards ----------
+
 def build_start_keyboard():
+    # user sees this when task first appears
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("▶️ شروع", callback_data="start"),
@@ -29,7 +33,9 @@ def build_start_keyboard():
         ]
     ])
 
+
 def build_running_keyboard():
+    # when timer is running
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ انجام شد", callback_data="done"),
@@ -37,10 +43,14 @@ def build_running_keyboard():
         ]
     ])
 
+
 def build_summary_button():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📋 گزارش امروز", callback_data="summary")]
     ])
+
+
+# ---------- command handlers ----------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -55,9 +65,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=build_summary_button(),
     )
 
+
 async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    init_state(chat_id)
+    init_state(chat_id)          # reset for today
     state = get_state(chat_id)
 
     idx = state["index"]
@@ -80,10 +91,14 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state["current_start"] = None
     save_all_state()
 
+
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     state = get_state(chat_id)
     await update.message.reply_text(build_summary_text(state))
+
+
+# ---------- button handler ----------
 
 async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -98,20 +113,28 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "start":
+        # start timer and change buttons to running mode
         start_timer(state)
-        await query.edit_message_reply_markup(reply_markup=build_running_keyboard())
+        await query.edit_message_reply_markup(
+            reply_markup=build_running_keyboard()
+        )
         save_all_state()
         return
 
+    # remaining data: "done" or "later"
     if state["mode"] == "main":
         await handle_main_round(query, state, data)
     else:
         await handle_extra_round(query, state, data)
 
+
+# ---------- main-round logic ----------
+
 async def handle_main_round(query, state, data: str):
     log = state["log"]
-    current_index = state["index"] - 1
+    current_index = state["index"] - 1  # last shown task index
 
+    # time spent on this task in main round
     elapsed_min = stop_timer(state)
     if 0 <= current_index < len(log) and elapsed_min > 0:
         log[current_index]["t_main"] += elapsed_min
@@ -126,8 +149,10 @@ async def handle_main_round(query, state, data: str):
     total = len(DAILY_TASKS)
 
     if state["index"] < total:
+        # show next task in main round
         next_index = state["index"]
         task = DAILY_TASKS[next_index]
+
         text = (
             f"🔹 تسک {next_index + 1} از {total}:\n"
             f"{task}\n\n"
@@ -143,6 +168,7 @@ async def handle_main_round(query, state, data: str):
         state["current_start"] = None
         save_all_state()
     else:
+        # end of main round → maybe extra round
         if state["later"]:
             state["mode"] = "extra"
             state["extra_index"] = 0
@@ -169,6 +195,9 @@ async def handle_main_round(query, state, data: str):
             await query.edit_message_text(build_summary_text(state))
             save_all_state()
 
+
+# ---------- extra-round logic ----------
+
 async def handle_extra_round(query, state, data: str):
     log = state["log"]
     later_list = state["later"]
@@ -186,6 +215,7 @@ async def handle_extra_round(query, state, data: str):
 
     current_task_idx = later_list[current_pos]
 
+    # time spent in extra round
     elapsed_min = stop_timer(state)
     if elapsed_min > 0:
         log[current_task_idx]["t_extra"] += elapsed_min
@@ -198,6 +228,7 @@ async def handle_extra_round(query, state, data: str):
     state["extra_index"] += 1
 
     if state["extra_index"] < len(later_list):
+        # show next extra task
         next_task_idx = later_list[state["extra_index"]]
         task = DAILY_TASKS[next_task_idx]
 
@@ -219,6 +250,9 @@ async def handle_extra_round(query, state, data: str):
         await query.edit_message_text(build_summary_text(state))
         save_all_state()
 
+
+# ---------- main ----------
+
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -229,6 +263,7 @@ def main():
 
     print("Bot is running...")
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()

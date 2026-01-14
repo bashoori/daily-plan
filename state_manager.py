@@ -3,7 +3,11 @@ import os
 import json
 import time
 from datetime import date
+
 from settings import STATE_FILE, DAILY_TASKS
+
+
+# ---------- helpers for loading/saving ----------
 
 def load_all_state():
     if not os.path.exists(STATE_FILE):
@@ -14,20 +18,25 @@ def load_all_state():
     except Exception:
         return {}
 
+
 def save_all_state():
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(ALL_STATE, f, ensure_ascii=False, indent=2)
 
+
+# key = chat_id (str)
 ALL_STATE = load_all_state()
 
+
 def init_state(chat_id: int):
+    """reset daily state for a chat"""
     key = str(chat_id)
     ALL_STATE[key] = {
-        "index": 0,
-        "later": [],
-        "mode": "main",
-        "extra_index": 0,
-        "current_start": None,
+        "index": 0,          # next task index in main round
+        "later": [],         # task indices that were postponed
+        "mode": "main",      # "main" or "extra"
+        "extra_index": 0,    # pointer into later list
+        "current_start": None,  # timestamp for running timer
         "log": [
             {"first": None, "second": None, "t_main": 0, "t_extra": 0}
             for _ in range(len(DAILY_TASKS))
@@ -35,27 +44,40 @@ def init_state(chat_id: int):
     }
     save_all_state()
 
+
 def get_state(chat_id: int):
     key = str(chat_id)
     if key not in ALL_STATE:
         init_state(chat_id)
     return ALL_STATE[key]
 
+
+# ---------- timer helpers ----------
+
 def start_timer(state):
     state["current_start"] = time.time()
 
+
 def stop_timer(state) -> int:
+    """stop timer, return elapsed minutes (>= 0), and clear start"""
     start_ts = state.get("current_start")
     if not start_ts:
         return 0
     elapsed_sec = time.time() - start_ts
     state["current_start"] = None
     minutes = int(elapsed_sec / 60)
-    return max(minutes, 1)
+    return max(minutes, 1)  # at least 1 minute if non-zero
+
+
+# ---------- summary text builder ----------
 
 def build_summary_text(state) -> str:
     log = state["log"]
-    done_main, done_extra, pending = [], [], []
+
+    done_main = []   # list of (task_text, minutes)
+    done_extra = []  # list of (task_text, minutes)
+    pending = []     # list of task_text
+
     total_main_minutes = 0
     total_extra_minutes = 0
 
@@ -76,45 +98,55 @@ def build_summary_text(state) -> str:
         else:
             pending.append(task_text)
 
-    total = len(DAILY_TASKS)
-    dn_main = len(done_main)
-    dn_extra = len(done_extra)
-    dn_total = dn_main + dn_extra
-    un_done = len(pending)
-    progress = int((dn_total / total) * 100) if total else 0
+    total_tasks = len(DAILY_TASKS)
+    n_main = len(done_main)
+    n_extra = len(done_extra)
+    n_done = n_main + n_extra
+    n_pending = len(pending)
+    progress = int((n_done / total_tasks) * 100) if total_tasks else 0
     total_focus = total_main_minutes + total_extra_minutes
+
     today_str = date.today().strftime("%Y-%m-%d")
 
-    lines = []
-    lines.append(f"📊 گزارش امروز ({today_str})\n")
-    lines.append(f"• کل تسک‌ها: {total}")
-    lines.append(f"• انجام‌شده: {dn_total}")
-    if dn_extra > 0:
-        lines.append(f"  └ از این‌ها در وقت اضافه: {dn_extra}")
-    lines.append(f"• مانده برای بعد: {un_done}")
+    lines: list[str] = []
+
+    # header
+    lines.append(f"📊 گزارش امروز ({today_str})")
+    lines.append("")
+    lines.append(f"• کل تسک‌ها: {total_tasks}")
+    lines.append(f"• انجام‌شده: {n_done}")
+    if n_extra > 0:
+        lines.append(f"  └ از این‌ها در وقت اضافه: {n_extra}")
+    lines.append(f"• مانده برای بعد: {n_pending}")
     lines.append(f"• درصد پیشرفت: {progress}%")
     lines.append(f"• مجموع زمان فوکوس: {total_focus} دقیقه")
     lines.append("")
 
+    # main round
     if done_main:
         lines.append("✅ انجام‌شده در راند اصلی:")
-        for t, m in done_main:
-            extra = f"  (~{m} دقیقه)" if m else ""
-            lines.append(f"  • {t}{extra}")
         lines.append("")
+        for text, mins in done_main:
+            extra = f"  (~{mins} دقیقه)" if mins else ""
+            lines.append(f"• {text}{extra}")
+            lines.append("")  # blank line between tasks
 
+    # extra round
     if done_extra:
         lines.append("⏱ انجام‌شده در وقت اضافه:")
-        for t, m in done_extra:
-            extra = f"  (~{m} دقیقه)" if m else ""
-            lines.append(f"  • {t}{extra}")
         lines.append("")
+        for text, mins in done_extra:
+            extra = f"  (~{mins} دقیقه)" if mins else ""
+            lines.append(f"• {text}{extra}")
+            lines.append("")
 
+    # pending
     if pending:
         lines.append("⏳ مانده برای فردا:")
-        for t in pending:
-            lines.append(f"  • {t}")
         lines.append("")
+        for text in pending:
+            lines.append(f"• {text}")
+            lines.append("")
     else:
         lines.append("🎉 آفرین! همه‌ی پلن امروز را زدی 👏")
 
