@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import date
 from dotenv import load_dotenv
 from telegram import (
     Update,
@@ -65,7 +66,6 @@ def init_state(chat_id: int):
         "log": [
             {"first": None, "second": None} for _ in range(len(DAILY_TASKS))
         ],
-        "message_id": None,  # آخرین پیام تسک که باید ادیت شود
     }
     save_all_state()
 
@@ -105,25 +105,42 @@ def build_summary_text(state) -> str:
         else:
             pending.append(task_text)
 
+    total = len(DAILY_TASKS)
+    count_done_main = len(done_main)
+    count_done_extra = len(done_extra)
+    count_done_total = count_done_main + count_done_extra
+    count_pending = len(pending)
+
+    progress = int((count_done_total / total) * 100) if total > 0 else 0
+
+    today_str = date.today().strftime("%Y-%m-%d")
+
     lines = []
-    lines.append("📊 گزارش امروز\n")
+    lines.append(f"📊 گزارش امروز ({today_str})\n")
+    lines.append(f"• کل تسک‌ها: {total}")
+    lines.append(f"• انجام‌شده: {count_done_total}")
+    if count_done_extra > 0:
+        lines.append(f"  └ از این‌ها در وقت اضافه: {count_done_extra}")
+    lines.append(f"• مانده برای بعد: {count_pending}")
+    lines.append(f"• درصد پیشرفت: {progress}٪")
+    lines.append("")
 
     if done_main:
         lines.append("✅ انجام‌شده در راند اصلی:")
         for t in done_main:
-            lines.append(f"• {t}")
+            lines.append(f"  • {t}")
         lines.append("")
 
     if done_extra:
         lines.append("⏱ انجام‌شده در وقت اضافه:")
         for t in done_extra:
-            lines.append(f"• {t}")
+            lines.append(f"  • {t}")
         lines.append("")
 
     if pending:
-        lines.append("⏳ مانده برای بعد / فردا:")
+        lines.append("⏳ مانده برای فردا / وقت اضافه:")
         for t in pending:
-            lines.append(f"• {t}")
+            lines.append(f"  • {t}")
         lines.append("")
     else:
         lines.append("🎉 هیچ کاری برای بعد نماند، همه انجام شد. آفرین 👏")
@@ -135,13 +152,13 @@ def build_summary_text(state) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "سلام، من بات برنامه‌ی روز هستم 🌱\n"
+        "سلام، من بات برنامه‌ی روز هستم 🌱\n\n"
         "دستورها:\n"
-        "/today  شروع برنامه‌ی امروز\n"
-        "/summary  گزارش امروز\n\n"
+        "• /today  شروع برنامه‌ی امروز\n"
+        "• /summary  خلاصه و گزارش امروز\n\n"
         "برای هر تسک:\n"
-        "✅ انجام شد → انجام‌شده\n"
-        "⏳ وقت اضافه → فعلاً رد می‌کنی، ولی در وقت اضافه و گزارش میاد."
+        "✅ «انجام شد» → یعنی واقعاً انجامش دادی.\n"
+        "⏳ «وقت اضافه» → یعنی الان رد می‌کنی، ولی در راند دوم و گزارش شب میاد."
     )
 
 
@@ -151,15 +168,21 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = get_state(chat_id)
 
     idx = state["index"]
+    total = len(DAILY_TASKS)
     task = DAILY_TASKS[idx]
 
-    msg = await update.message.reply_text(
-        f"برنامه‌ی امروز شروع شد ✅\n\n{task}",
+    text = (
+        "🌱 برنامه‌ی امروز شروع شد.\n\n"
+        f"🔹 تسک {idx + 1} از {total}:\n"
+        f"{task}"
+    )
+
+    await update.message.reply_text(
+        text,
         reply_markup=build_task_keyboard(),
     )
 
     state["index"] += 1
-    state["message_id"] = msg.message_id
     save_all_state()
 
 
@@ -196,13 +219,20 @@ async def handle_main_round(query, state, data: str):
         if current_index not in state["later"]:
             state["later"].append(current_index)
 
+    total = len(DAILY_TASKS)
+
     # آیا هنوز در راند اصلی تسک باقی مانده؟
-    if state["index"] < len(DAILY_TASKS):
+    if state["index"] < total:
         next_index = state["index"]
         task = DAILY_TASKS[next_index]
 
+        text = (
+            f"🔹 تسک {next_index + 1} از {total}:\n"
+            f"{task}"
+        )
+
         await query.edit_message_text(
-            text=task,
+            text=text,
             reply_markup=build_task_keyboard(),
         )
 
@@ -217,10 +247,16 @@ async def handle_main_round(query, state, data: str):
 
             later_list = state["later"]
             idx = later_list[state["extra_index"]]
-            task = f"⏱ وقت اضافه:\n\n{DAILY_TASKS[idx]}"
+            task = DAILY_TASKS[idx]
+
+            text = (
+                "⏱ وقت اضافه – راند دوم\n\n"
+                f"🔹 تسک {state['extra_index'] + 1} از {len(later_list)}:\n"
+                f"{task}"
+            )
 
             await query.edit_message_text(
-                text=task,
+                text=text,
                 reply_markup=build_task_keyboard(),
             )
 
@@ -260,10 +296,16 @@ async def handle_extra_round(query, state, data: str):
 
     if state["extra_index"] < len(later_list):
         next_task_idx = later_list[state["extra_index"]]
-        task = f"⏱ وقت اضافه:\n\n{DAILY_TASKS[next_task_idx]}"
+        task = DAILY_TASKS[next_task_idx]
+
+        text = (
+            "⏱ وقت اضافه – راند دوم\n\n"
+            f"🔹 تسک {state['extra_index'] + 1} از {len(later_list)}:\n"
+            f"{task}"
+        )
 
         await query.edit_message_text(
-            text=task,
+            text=text,
             reply_markup=build_task_keyboard(),
         )
 
