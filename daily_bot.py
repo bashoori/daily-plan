@@ -22,21 +22,20 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set in .env file")
 
 
-# ---------- تنظیمات ----------
+# ---------- TASK LIST ----------
 DAILY_TASKS = [
-    "۱️⃣ 10 دقیقه مدیتیشن یا نفس عمیق.",
-    "۲️⃣ چک کردن جاب‌ها و ۳ تا اپلای.",
-    "۳️⃣ ۴۵ دقیقه درس (Azure/Exam).",
-    "۴️⃣ ۱۵ دقیقه استراحت و کشش.",
-    "۵️⃣ ۳۰ دقیقه نتورکینگ/لینکدین.",
-    "۶️⃣ ۲۰ دقیقه ورزش سبک.",
+    "(1) 10 دقیقه مدیتیشن یا نفس عمیق",
+    "(2) چک کردن جاب‌ها و 3 تا اپلای",
+    "(3) 45 دقیقه درس Azure/Exam",
+    "(4) 15 دقیقه استراحت و کشش",
+    "(5) 30 دقیقه نتورکینگ/لینکدین",
+    "(6) 20 دقیقه ورزش سبک",
 ]
 
 STATE_FILE = "state.json"
 
 
-# ---------- مدیریت ذخیره state در فایل JSON ----------
-
+# ---------- STATE HELPERS ----------
 def load_all_state():
     if not os.path.exists(STATE_FILE):
         return {}
@@ -52,17 +51,16 @@ def save_all_state():
         json.dump(ALL_STATE, f, ensure_ascii=False, indent=2)
 
 
-# ALL_STATE: key = chat_id (str) → state dict
 ALL_STATE = load_all_state()
 
 
 def init_state(chat_id: int):
     key = str(chat_id)
     ALL_STATE[key] = {
-        "index": 0,          # در راند اصلی: اندیس تسک بعدی
-        "later": [],         # اندیس تسک‌هایی که رفتند برای وقت اضافه
-        "mode": "main",      # "main" یا "extra"
-        "extra_index": 0,    # در راند extra: اندیس فعلی در لیست later
+        "index": 0,
+        "later": [],
+        "mode": "main",
+        "extra_index": 0,
         "log": [
             {"first": None, "second": None} for _ in range(len(DAILY_TASKS))
         ],
@@ -78,13 +76,18 @@ def get_state(chat_id: int):
 
 
 def build_task_keyboard():
-    keyboard = [
+    return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✅ انجام شد", callback_data="done"),
-            InlineKeyboardButton("⏳ وقت اضافه", callback_data="later"),
+            InlineKeyboardButton("⏳ وقت اضافه", callback_data="later")
         ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    ])
+
+
+def build_start_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 گزارش امروز", callback_data="summary")]
+    ])
 
 
 def build_summary_text(state) -> str:
@@ -106,23 +109,22 @@ def build_summary_text(state) -> str:
             pending.append(task_text)
 
     total = len(DAILY_TASKS)
-    count_done_main = len(done_main)
-    count_done_extra = len(done_extra)
-    count_done_total = count_done_main + count_done_extra
-    count_pending = len(pending)
-
-    progress = int((count_done_total / total) * 100) if total > 0 else 0
+    dn_main = len(done_main)
+    dn_extra = len(done_extra)
+    dn_total = dn_main + dn_extra
+    un_done = len(pending)
+    progress = int((dn_total / total) * 100)
 
     today_str = date.today().strftime("%Y-%m-%d")
 
     lines = []
     lines.append(f"📊 گزارش امروز ({today_str})\n")
     lines.append(f"• کل تسک‌ها: {total}")
-    lines.append(f"• انجام‌شده: {count_done_total}")
-    if count_done_extra > 0:
-        lines.append(f"  └ از این‌ها در وقت اضافه: {count_done_extra}")
-    lines.append(f"• مانده برای بعد: {count_pending}")
-    lines.append(f"• درصد پیشرفت: {progress}٪")
+    lines.append(f"• انجام‌شده: {dn_total}")
+    if dn_extra > 0:
+        lines.append(f"  └ از این‌ها در وقت اضافه: {dn_extra}")
+    lines.append(f"• مانده برای بعد: {un_done}")
+    lines.append(f"• درصد پیشرفت: {progress}%")
     lines.append("")
 
     if done_main:
@@ -138,27 +140,26 @@ def build_summary_text(state) -> str:
         lines.append("")
 
     if pending:
-        lines.append("⏳ مانده برای فردا / وقت اضافه:")
+        lines.append("⏳ مانده برای فردا:")
         for t in pending:
             lines.append(f"  • {t}")
         lines.append("")
     else:
-        lines.append("🎉 هیچ کاری برای بعد نماند، همه انجام شد. آفرین 👏")
+        lines.append("🎉 آفرین! همه انجام شد 👏")
 
     return "\n".join(lines)
 
 
-# ---------- handlers ----------
-
+# ---------- HANDLERS ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "سلام، من بات برنامه‌ی روز هستم 🌱\n\n"
+        "🌱 سلام! من همراه روزانه‌ات هستم.\n"
+        "با هم قدم‌به‌قدم جلو می‌ریم.\n\n"
         "دستورها:\n"
-        "• /today  شروع برنامه‌ی امروز\n"
-        "• /summary  خلاصه و گزارش امروز\n\n"
-        "برای هر تسک:\n"
-        "✅ «انجام شد» → یعنی واقعاً انجامش دادی.\n"
-        "⏳ «وقت اضافه» → یعنی الان رد می‌کنی، ولی در راند دوم و گزارش شب میاد."
+        "• /today شروع کارهای امروز\n"
+        "• /summary گزارش روز\n\n"
+        "اگر آماده‌ای، شروع کن 💪",
+        reply_markup=build_start_keyboard()
     )
 
 
@@ -172,7 +173,7 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     task = DAILY_TASKS[idx]
 
     text = (
-        "🌱 برنامه‌ی امروز شروع شد.\n\n"
+        "🚀 شروع برنامه امروز!\n\n"
         f"🔹 تسک {idx + 1} از {total}:\n"
         f"{task}"
     )
@@ -189,8 +190,7 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     state = get_state(chat_id)
-    summary_text = build_summary_text(state)
-    await update.message.reply_text(summary_text)
+    await update.message.reply_text(build_summary_text(state))
 
 
 async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -201,17 +201,20 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.message.chat_id
     state = get_state(chat_id)
 
+    if data == "summary":
+        await query.edit_message_text(build_summary_text(state))
+        return
+
     if state["mode"] == "main":
         await handle_main_round(query, state, data)
     else:
         await handle_extra_round(query, state, data)
 
 
-async def handle_main_round(query, state, data: str):
+async def handle_main_round(query, state, data):
     log = state["log"]
-    current_index = state["index"] - 1  # آخرین تسکی که نمایش داده شده
+    current_index = state["index"] - 1
 
-    # ثبت وضعیت این تسک در log
     if data == "done":
         log[current_index]["first"] = "done"
     elif data == "later":
@@ -221,27 +224,16 @@ async def handle_main_round(query, state, data: str):
 
     total = len(DAILY_TASKS)
 
-    # آیا هنوز در راند اصلی تسک باقی مانده؟
     if state["index"] < total:
         next_index = state["index"]
         task = DAILY_TASKS[next_index]
+        text = f"🔹 تسک {next_index + 1} از {total}:\n{task}"
 
-        text = (
-            f"🔹 تسک {next_index + 1} از {total}:\n"
-            f"{task}"
-        )
-
-        await query.edit_message_text(
-            text=text,
-            reply_markup=build_task_keyboard(),
-        )
-
+        await query.edit_message_text(text, reply_markup=build_task_keyboard())
         state["index"] += 1
         save_all_state()
     else:
-        # راند اصلی تمام شد
         if state["later"]:
-            # وارد راند وقت اضافه می‌شویم
             state["mode"] = "extra"
             state["extra_index"] = 0
 
@@ -249,42 +241,20 @@ async def handle_main_round(query, state, data: str):
             idx = later_list[state["extra_index"]]
             task = DAILY_TASKS[idx]
 
-            text = (
-                "⏱ وقت اضافه – راند دوم\n\n"
-                f"🔹 تسک {state['extra_index'] + 1} از {len(later_list)}:\n"
-                f"{task}"
-            )
+            text = f"⏱ وقت اضافه – راند دوم\n\n🔹 تسک 1 از {len(later_list)}:\n{task}"
 
-            await query.edit_message_text(
-                text=text,
-                reply_markup=build_task_keyboard(),
-            )
-
+            await query.edit_message_text(text, reply_markup=build_task_keyboard())
             save_all_state()
         else:
-            # هیچ کاری برای وقت اضافه نداریم → مستقیم گزارش
-            summary_text = build_summary_text(state)
-            await query.edit_message_text(summary_text)
+            await query.edit_message_text(build_summary_text(state))
             save_all_state()
 
 
-async def handle_extra_round(query, state, data: str):
+async def handle_extra_round(query, state, data):
     log = state["log"]
     later_list = state["later"]
 
-    if not later_list:
-        summary_text = build_summary_text(state)
-        await query.edit_message_text(summary_text)
-        save_all_state()
-        return
-
     current_pos = state["extra_index"]
-    if current_pos >= len(later_list):
-        summary_text = build_summary_text(state)
-        await query.edit_message_text(summary_text)
-        save_all_state()
-        return
-
     current_task_idx = later_list[current_pos]
 
     if data == "done":
@@ -296,26 +266,19 @@ async def handle_extra_round(query, state, data: str):
 
     if state["extra_index"] < len(later_list):
         next_task_idx = later_list[state["extra_index"]]
-        task = DAILY_TASKS[next_task_idx]
-
         text = (
-            "⏱ وقت اضافه – راند دوم\n\n"
+            f"⏱ وقت اضافه – راند دوم\n\n"
             f"🔹 تسک {state['extra_index'] + 1} از {len(later_list)}:\n"
-            f"{task}"
+            f"{DAILY_TASKS[next_task_idx]}"
         )
-
-        await query.edit_message_text(
-            text=text,
-            reply_markup=build_task_keyboard(),
-        )
-
+        await query.edit_message_text(text, reply_markup=build_task_keyboard())
         save_all_state()
     else:
-        summary_text = build_summary_text(state)
-        await query.edit_message_text(summary_text)
+        await query.edit_message_text(build_summary_text(state))
         save_all_state()
 
 
+# ---------- MAIN ----------
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -324,7 +287,7 @@ def main():
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CallbackQueryHandler(handle_button))
 
-    print("Bot is running...")
+    print("Bot running...")
     app.run_polling()
 
 
