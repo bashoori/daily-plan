@@ -5,7 +5,6 @@ from telegram import (
     Update,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    InputMediaPhoto,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -31,9 +30,6 @@ DAILY_TASKS = [
     "۵️⃣ ۳۰ دقیقه نتورکینگ/لینکدین.",
     "۶️⃣ ۲۰ دقیقه ورزش سبک.",
 ]
-
-# یک عکس تستی عمومی؛ بعداً لینک خودت را بگذار
-TASK_IMAGE_URL = "https://placehold.co/600x400?text=Focus"
 
 STATE_FILE = "state.json"
 
@@ -62,13 +58,14 @@ ALL_STATE = load_all_state()
 def init_state(chat_id: int):
     key = str(chat_id)
     ALL_STATE[key] = {
-        "index": 0,          # در راند اصلی: اندیس تسک بعدی که باید نمایش داده شود
+        "index": 0,          # در راند اصلی: اندیس تسک بعدی
         "later": [],         # اندیس تسک‌هایی که رفتند برای وقت اضافه
         "mode": "main",      # "main" یا "extra"
         "extra_index": 0,    # در راند extra: اندیس فعلی در لیست later
         "log": [
             {"first": None, "second": None} for _ in range(len(DAILY_TASKS))
         ],
+        "message_id": None,  # آخرین پیام تسک که باید ادیت شود
     }
     save_all_state()
 
@@ -156,13 +153,13 @@ async def today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     idx = state["index"]
     task = DAILY_TASKS[idx]
 
-    await update.message.reply_photo(
-        photo=TASK_IMAGE_URL,
-        caption=f"برنامه‌ی امروز شروع شد ✅\n\n{task}",
+    msg = await update.message.reply_text(
+        f"برنامه‌ی امروز شروع شد ✅\n\n{task}",
         reply_markup=build_task_keyboard(),
     )
 
     state["index"] += 1
+    state["message_id"] = msg.message_id
     save_all_state()
 
 
@@ -204,11 +201,8 @@ async def handle_main_round(query, state, data: str):
         next_index = state["index"]
         task = DAILY_TASKS[next_index]
 
-        await query.edit_message_media(
-            media=InputMediaPhoto(
-                media=TASK_IMAGE_URL,
-                caption=task,
-            ),
+        await query.edit_message_text(
+            text=task,
             reply_markup=build_task_keyboard(),
         )
 
@@ -225,20 +219,16 @@ async def handle_main_round(query, state, data: str):
             idx = later_list[state["extra_index"]]
             task = f"⏱ وقت اضافه:\n\n{DAILY_TASKS[idx]}"
 
-            await query.edit_message_media(
-                media=InputMediaPhoto(
-                    media=TASK_IMAGE_URL,
-                    caption=task,
-                ),
+            await query.edit_message_text(
+                text=task,
                 reply_markup=build_task_keyboard(),
             )
 
-            # extra_index نشان‌دهنده تسک فعلی در لیست later است
             save_all_state()
         else:
             # هیچ کاری برای وقت اضافه نداریم → مستقیم گزارش
             summary_text = build_summary_text(state)
-            await query.edit_message_caption(summary_text)
+            await query.edit_message_text(summary_text)
             save_all_state()
 
 
@@ -246,50 +236,41 @@ async def handle_extra_round(query, state, data: str):
     log = state["log"]
     later_list = state["later"]
 
-    # اگر لیست later خالی است، مستقیم گزارش بده
     if not later_list:
         summary_text = build_summary_text(state)
-        await query.edit_message_caption(summary_text)
+        await query.edit_message_text(summary_text)
         save_all_state()
         return
 
-    # اندیس فعلی در راند extra
     current_pos = state["extra_index"]
     if current_pos >= len(later_list):
-        # یعنی همه را دیده‌ایم → گزارش
         summary_text = build_summary_text(state)
-        await query.edit_message_caption(summary_text)
+        await query.edit_message_text(summary_text)
         save_all_state()
         return
 
     current_task_idx = later_list[current_pos]
 
-    # ثبت وضعیت این تسک در log (second)
     if data == "done":
         log[current_task_idx]["second"] = "done"
     elif data == "later":
         log[current_task_idx]["second"] = "later"
 
-    # رفتن به تسک بعدی در وقت اضافه
     state["extra_index"] += 1
 
     if state["extra_index"] < len(later_list):
         next_task_idx = later_list[state["extra_index"]]
         task = f"⏱ وقت اضافه:\n\n{DAILY_TASKS[next_task_idx]}"
 
-        await query.edit_message_media(
-            media=InputMediaPhoto(
-                media=TASK_IMAGE_URL,
-                caption=task,
-            ),
+        await query.edit_message_text(
+            text=task,
             reply_markup=build_task_keyboard(),
         )
 
         save_all_state()
     else:
-        # دیگر تسکی در وقت اضافه نمانده → گزارش نهایی
         summary_text = build_summary_text(state)
-        await query.edit_message_caption(summary_text)
+        await query.edit_message_text(summary_text)
         save_all_state()
 
 
